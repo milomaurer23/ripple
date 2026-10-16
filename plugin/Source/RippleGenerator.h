@@ -4,6 +4,10 @@
 // One damped-harmonic-oscillator "droplet": each trigger period, a decaying cosine rings out
 // and settles back to unity gain. Tension morphs it from a symmetric ripple (above/below unity)
 // toward a one-directional duck. See RippleGenerator.cpp for the formula.
+//
+// The plugin's audio now runs through the Faust port of this (plugin/Faust/Ripple.dsp, driven by
+// RippleEngine). This class stays as the editor's curve source (computeGain) and as the reference
+// that Tests/RippleFaustTests.cpp holds the Faust engine to.
 struct RippleParams
 {
     float depth = 0.7f;          // 0..1, contribution of the ripple to the gain

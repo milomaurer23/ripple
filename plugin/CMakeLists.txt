@@ -33,7 +33,8 @@ target_sources(${PLUGIN_TARGET_NAME} PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/RippleGenerator.cpp
-    Source/RippleView.cpp)
+    Source/RippleView.cpp
+    Source/RippleEngine.cpp)
 
 target_compile_definitions(${PLUGIN_TARGET_NAME} PUBLIC
     JUCE_WEB_BROWSER=0
@@ -44,6 +45,23 @@ target_link_libraries(${PLUGIN_TARGET_NAME}
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+# ---- Equivalence check: the Faust engine against the C++ engine it replaced ----
+juce_add_console_app(RippleFaustTests PRODUCT_NAME "RippleFaustTests")
+juce_generate_juce_header(RippleFaustTests)
+target_sources(RippleFaustTests PRIVATE
+    Tests/RippleFaustTests.cpp
+    Source/RippleEngine.cpp
+    Source/RippleGenerator.cpp)
+target_compile_definitions(RippleFaustTests PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0)
+target_link_libraries(RippleFaustTests
+    PRIVATE
+        juce::juce_audio_processors
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)

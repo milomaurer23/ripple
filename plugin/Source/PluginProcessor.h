@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "Parameters.h"
+#include "RippleEngine.h"
 #include "RippleGenerator.h"
 
 class RippleAudioProcessor final : public juce::AudioProcessor
@@ -34,12 +35,12 @@ public:
     // For the editor: what the generator is currently doing, so the curve view can draw the
     // exact same shape being applied to the audio.
     RippleParams getCurrentRippleParams() const { return lastRippleParams; }
-    double getGeneratorPhaseSeconds() const { return leftGenerator.getPhaseSeconds(); }
+    double getGeneratorPhaseSeconds() const { return engine.getPhaseSeconds(); }
 
     juce::AudioProcessorValueTreeState state;
 
 private:
-    RippleParams buildRippleParams (double sampleRate, double hostBpm, double ppqPosition, bool isPlaying);
+    RippleEngineSettings buildEngineSettings (double hostBpm, double ppqPosition);
 
     std::atomic<float>* pRateHz = nullptr;
     std::atomic<float>* pSyncDiv = nullptr;
@@ -52,13 +53,8 @@ private:
     std::atomic<float>* pMix = nullptr;
     std::atomic<float>* pOutputGain = nullptr;
 
-    RippleGenerator leftGenerator;
+    RippleEngine engine;
     RippleParams lastRippleParams;
-
-    std::vector<float> gainHistory;
-    int gainHistoryWrite = 0;
-
-    double currentSampleRate = 44100.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RippleAudioProcessor)
 };

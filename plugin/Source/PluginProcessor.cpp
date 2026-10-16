@@ -19,14 +19,9 @@ RippleAudioProcessor::RippleAudioProcessor()
     pOutputGain   = state.getRawParameterValue (ParamIDs::outputGain);
 }
 
-void RippleAudioProcessor::prepareToPlay (double sampleRate, int)
+void RippleAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    currentSampleRate = sampleRate;
-    leftGenerator.prepare (sampleRate);
-
-    const int historySize = (int) (0.05 * sampleRate) + 8; // covers max 50ms stereo offset
-    gainHistory.assign ((size_t) historySize, 1.0f);
-    gainHistoryWrite = 0;
+    engine.prepare (sampleRate, samplesPerBlock);
 }
 
 void RippleAudioProcessor::releaseResources() {}
@@ -39,15 +34,16 @@ bool RippleAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
     return layouts.getMainInputChannelSet() == set;
 }
 
-RippleParams RippleAudioProcessor::buildRippleParams (double sampleRate, double hostBpm, double ppqPosition, bool isPlaying)
+RippleEngineSettings RippleAudioProcessor::buildEngineSettings (double hostBpm, double ppqPosition)
 {
-    juce::ignoreUnused (sampleRate, isPlaying);
-
-    RippleParams p;
-    p.depth = pDepth->load();
-    p.ripples = (int) pRipples->load();
-    p.decay = pDecay->load();
-    p.tension = pTension->load();
+    RippleEngineSettings s;
+    s.depth = pDepth->load();
+    s.ripples = (int) pRipples->load();
+    s.decay = pDecay->load();
+    s.tension = pTension->load();
+    s.stereoOffsetMs = pStereoOffset->load();
+    s.mix = pMix->load();
+    s.outputGainDb = pOutputGain->load();
 
     const bool synced = pSyncMode->load() > 0.5f;
     const auto& divs = syncDivisions();
@@ -55,20 +51,21 @@ RippleParams RippleAudioProcessor::buildRippleParams (double sampleRate, double 
 
     if (synced && hostBpm > 0.0)
     {
+        // Lock to the host's ppqPosition every block instead of free-running (which would drift).
         const double beats = divs[(size_t) divIndex].beats;
-        p.periodSeconds = beats * 60.0 / hostBpm;
+        s.periodSeconds = beats * 60.0 / hostBpm;
 
         const double phaseBeats = std::fmod (ppqPosition, beats);
-        const double phaseSeconds = (phaseBeats < 0.0 ? phaseBeats + beats : phaseBeats) * 60.0 / hostBpm;
-        leftGenerator.setPhaseSeconds (phaseSeconds);
+        s.resync = true;
+        s.syncPhaseSeconds = (phaseBeats < 0.0 ? phaseBeats + beats : phaseBeats) * 60.0 / hostBpm;
     }
     else
     {
         const double rate = juce::jmax (0.0001, (double) pRateHz->load());
-        p.periodSeconds = 1.0 / rate;
+        s.periodSeconds = 1.0 / rate;
     }
 
-    return p;
+    return s;
 }
 
 void RippleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -77,7 +74,6 @@ void RippleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     double hostBpm = 120.0;
     double ppqPosition = 0.0;
-    bool isPlaying = false;
 
     if (auto* playHead = getPlayHead())
     {
@@ -85,46 +81,20 @@ void RippleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         {
             hostBpm = position->getBpm().orFallback (120.0);
             ppqPosition = position->getPpqPosition().orFallback (0.0);
-            isPlaying = position->getIsPlaying();
         }
     }
 
-    const auto rippleParams = buildRippleParams (currentSampleRate, hostBpm, ppqPosition, isPlaying);
-    leftGenerator.setParameters (rippleParams);
-    lastRippleParams = rippleParams;
+    const auto settings = buildEngineSettings (hostBpm, ppqPosition);
 
-    const float mix = pMix->load();
-    const float outputGainLinear = juce::Decibels::decibelsToGain (pOutputGain->load());
-    const int historySize = (int) gainHistory.size();
-    const int delaySamples = historySize > 1
-        ? juce::jlimit (0, historySize - 1, (int) ((double) pStereoOffset->load() / 1000.0 * currentSampleRate))
-        : 0;
+    RippleParams curve;
+    curve.depth = settings.depth;
+    curve.ripples = settings.ripples;
+    curve.decay = settings.decay;
+    curve.tension = settings.tension;
+    curve.periodSeconds = settings.periodSeconds;
+    lastRippleParams = curve;
 
-    const int numChannels = buffer.getNumChannels();
-    const int numSamples = buffer.getNumSamples();
-
-    for (int i = 0; i < numSamples; ++i)
-    {
-        const float gL = leftGenerator.getNextGain();
-
-        float gR = gL;
-        if (historySize > 0)
-        {
-            gainHistory[(size_t) gainHistoryWrite] = gL;
-            const int readIndex = ((gainHistoryWrite - delaySamples) % historySize + historySize) % historySize;
-            gR = gainHistory[(size_t) readIndex];
-            gainHistoryWrite = (gainHistoryWrite + 1) % historySize;
-        }
-
-        for (int ch = 0; ch < numChannels; ++ch)
-        {
-            const float g = (ch == 1) ? gR : gL;
-            auto* data = buffer.getWritePointer (ch);
-            const float dry = data[i];
-            const float wet = dry * g;
-            data[i] = (dry * (1.0f - mix) + wet * mix) * outputGainLinear;
-        }
-    }
+    engine.process (buffer, settings);
 }
 
 juce::AudioProcessorEditor* RippleAudioProcessor::createEditor()
